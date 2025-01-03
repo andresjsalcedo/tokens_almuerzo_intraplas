@@ -30,9 +30,12 @@ class EscanerQRWeb:
         escaner = EscanerQRWeb()
         empleados = escaner.obtener_empleados()
         if not empleados:
-            print("No se encontraron empleados")  # Debug line
-        return render_template('tokens_intraplas.html',  # Match your HTML filename
-                         empleados=empleados)
+            print("No se encontraron empleados")  
+        return render_template('tokens_intraplas.html',  
+                         empleados=empleados,
+                         fecha=datetime.now().strftime('%Y-%m-%d'),
+                         hora=datetime.now().strftime('%H:%M:%S'))
+
             
     def actualizar_empleado(self, id, nombre, departamento, tokens):
         try:
@@ -70,7 +73,7 @@ def registrar():
             'fullname': request.form.get('fullname')
         })
         db.session.commit()
-        return render_template('login.html', redirect_url='/')
+        return render_template('login.html', redirect_url='/Dashboard')
     except Exception as e:
         db.session.rollback()
         print(f"Error al registrar usuario: {e}")
