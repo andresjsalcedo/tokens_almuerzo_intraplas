@@ -37,15 +37,15 @@ class EscanerQRWeb:
     def actualizar_empleado(self, id, nombre, departamento, tokens):
         try:
             db.session.execute(text("""
-                UPDATE empleados_info 
-                SET nombre = :nombre, departamento = :departamento, tokens_almuerzo = :tokens 
-                WHERE id = :id
-            """), {'nombre': nombre, 'departamento': departamento, 'tokens': tokens, 'id': id})
+            UPDATE empleados_info
+            SET nombre = :nombre, departamento = :departamento, tokens_almuerzo = :tokens 
+            WHERE id = :id
+        """), {'nombre': nombre, 'departamento': departamento, 'tokens': tokens, 'id': id})
             db.session.commit()
             return True
         except Exception as e:
             print(f"Error al actualizar empleado: {e}")
-        db.session.rollback()
+            db.session.rollback()
         return False
 
     def obtener_total_empleados(self):
