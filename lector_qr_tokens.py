@@ -5,56 +5,63 @@ from datetime import datetime
 import openpyxl as xl
 import time
 import os
-import mysql.connector
-import mysql
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 
+app = Flask(__name__)
+# Configuración de la base de datos PostgreSQL con SQLAlchemy
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:root@localhost/empleados'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
 class EscanerQR:
     def __init__(self):
-        self.conexion = mysql.connector.connect(
-            host='localhost',
-            database='empleados',
-            user='root',
-            password='root'
-        )
-        self.cursor = self.conexion. cursor(dictionary=True)
         self.cap = cv2.VideoCapture(0)
         self.codigos_registrados = set()
-        self.carpeta_destino = 'C:/Users/andres.salcedo.INTRAPLAS/Desktop/tokens_intraplas/registro_tokens_intraplas'
+        self.carpeta_destino = 'C:/Users/andres.salcedo.INTRAPLAS/Desktop/tokens_intraplas2/registro_tokens_intraplas'
         
         if not os.path.exists(self.carpeta_destino):
             os.makedirs(self.carpeta_destino)
 
     def validar_codigo_qr(self, codigo):
         try:
-            consulta = """SELECT id, nombre, departamento, tokens_almuerzo 
-                         FROM empleados_info 
-                         WHERE id = %s AND tokens_almuerzo > 0"""
+            # Usando SQLAlchemy con text() para consultas SQL directas
+            consulta = text("""SELECT id, nombre, departamento, tokens_almuerzo 
+                             FROM empleados_info 
+                             WHERE id = :codigo AND tokens_almuerzo > 0""")
             
-            self.cursor.execute(consulta, (codigo,))
-            empleados_info = self.cursor.fetchone()
+            resultado = db.session.execute(consulta, {'codigo': codigo})
+            empleado_info = resultado.fetchone()
             
-            if empleados_info:
-                self.descontar_token(empleados_info['id'])
-                return empleados_info
+            if empleado_info:
+                self.descontar_token(empleado_info.id)
+                # Convertir el resultado a diccionario
+                return {
+                    'id': empleado_info.id,
+                    'nombre': empleado_info.nombre,
+                    'departamento': empleado_info.departamento,
+                    'tokens_almuerzo': empleado_info.tokens_almuerzo
+                }
             return None
             
         except Exception as e:
             print(f"Error al validar código: {e}")
+            db.session.rollback()
             return None
 
     def descontar_token(self, empleado_id):
         try:
-            update_query = """UPDATE empleados_info 
-                            SET tokens_almuerzo = tokens_almuerzo - 1 
-                            WHERE id = %s"""
+            update_query = text("""UPDATE empleados_info 
+                                 SET tokens_almuerzo = tokens_almuerzo - 1 
+                                 WHERE id = :empleado_id""")
             
-            self.cursor.execute(update_query, (empleado_id,))
-            self.conexion.commit()
+            db.session.execute(update_query, {'empleado_id': empleado_id})
+            db.session.commit()
             
         except Exception as e:
             print(f"Error al descontar token: {e}")
-            self.conexion.rollback()
+            db.session.rollback()
 
     def registrar_entrada(self, empleados_info, hora, fecha):
         try:
@@ -86,63 +93,56 @@ class EscanerQR:
         except Exception as e:
             print(f"Error al registrar el consumo de token: {e}")
 
- 
-
     def iniciar_escaneo(self):
-        while True:
-            ret, frame = self.cap.read()
-            
-            cv2.putText(frame, 'Presiona ESC para salir', (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
-            
-            cv2.rectangle(frame, (170, 100), (470, 400), (0, 255, 0), 2)
-            
-            hora = datetime.now().strftime('%H:%M:%S')
-            fecha = datetime.now().strftime('%Y-%m-%d')
-            
-            for codigo_qr in decode(frame):
-                codigo = codigo_qr.data.decode('utf-8')
+        with app.app_context():  # Necesario para trabajar con SQLAlchemy fuera de una ruta Flask
+            while True:
+                ret, frame = self.cap.read()
                 
-                if codigo not in self.codigos_registrados:
-                    empleados_info = self.validar_codigo_qr(codigo)
+                cv2.putText(frame, 'Presiona ESC para salir', (10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
+                
+                cv2.rectangle(frame, (170, 100), (470, 400), (0, 255, 0), 2)
+                
+                hora = datetime.now().strftime('%H:%M:%S')
+                fecha = datetime.now().strftime('%Y-%m-%d')
+                
+                for codigo_qr in decode(frame):
+                    codigo = codigo_qr.data.decode('utf-8')
                     
-                    if empleados_info:
-                        self.registrar_entrada(empleados_info, hora, fecha)
-                        self.codigos_registrados.add(codigo)
+                    if codigo not in self.codigos_registrados:
+                        empleados_info = self.validar_codigo_qr(codigo)
                         
+                        if empleados_info:
+                            self.registrar_entrada(empleados_info, hora, fecha)
+                            self.codigos_registrados.add(codigo)
+                            
+                            pts = np.array([codigo_qr.polygon], np.int32)
+                            pts = pts.reshape((-1, 1, 2))
+                            cv2.polylines(frame, [pts], True, (0, 255, 0), 5)
+                            cv2.putText(frame, 'ENTRADA REGISTRADA', 
+                                        (codigo_qr.rect.left, codigo_qr.rect.top - 30), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                        else:
+                            cv2.putText(frame, 'SIN TOKENS DISPONIBLES', 
+                                        (codigo_qr.rect.left, codigo_qr.rect.top - 30), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                             
+                    elif codigo in self.codigos_registrados:
                         pts = np.array([codigo_qr.polygon], np.int32)
                         pts = pts.reshape((-1, 1, 2))
                         cv2.polylines(frame, [pts], True, (0, 255, 0), 5)
-                        cv2.putText(frame, 'ENTRADA REGISTRADA', 
+                        cv2.putText(frame, 'REGISTRO YA EXISTENTE', 
                                     (codigo_qr.rect.left, codigo_qr.rect.top - 30), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    else:
-                        cv2.putText(frame, 'SIN TOKENS DISPONIBLES', 
-                                    (codigo_qr.rect.left, codigo_qr.rect.top - 30), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                         
-                elif codigo in self.codigos_registrados:
-                    pts = np.array([codigo_qr.polygon], np.int32)
-                    pts = pts.reshape((-1, 1, 2))
-                    cv2.polylines(frame, [pts], True, (0, 255, 0), 5)
-                    cv2.putText(frame, 'REGISTRO YA EXISTENTE', 
-                                (codigo_qr.rect.left, codigo_qr.rect.top - 30), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    
+                
+                cv2.imshow('Escáner QR', frame)
+                
+                if cv2.waitKey(1) == 27:
+                    break
             
-            cv2.imshow('Escáner QR', frame)
-            
-            if cv2.waitKey(1) == 27:
-                break
-        
-        self.cap.release()
-        cv2.destroyAllWindows()
-        self.conexion.close()
-
-
-
+            self.cap.release()
+            cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     escaner = EscanerQR()
     escaner.iniciar_escaneo()
-

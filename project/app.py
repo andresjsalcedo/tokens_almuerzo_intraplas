@@ -60,10 +60,10 @@ class EscanerQRWeb:
 @app.route('/registrar', methods=['POST'])
 def registrar():
     try:
-        db.session.execute("""
+        db.session.execute(text("""
             INSERT INTO usuarios (username, password, email, fullname) 
             VALUES (:username, :password, :email, :fullname)
-        """, {
+        """), {
             'username': request.form.get('username'),
             'password': request.form.get('password'),
             'email': request.form.get('email'),
@@ -85,6 +85,8 @@ def dashboard():
     escaner = EscanerQRWeb()
     total_usuarios = escaner.obtener_total_empleados()
     return render_template('Dashboard.html', total_usuarios=total_usuarios)
+
+
 
 @app.route('/api/total-usuarios')
 def obtener_total_usuarios():
